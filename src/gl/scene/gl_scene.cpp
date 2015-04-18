@@ -884,6 +884,9 @@ void FGLRenderer::RenderView (player_t* player)
 
 	sector_t * viewsector = RenderViewpoint(player->camera, NULL, FieldOfView * 360.0f / FINEANGLES, ratio, fovratio, true, true);
 	EndDrawScene(viewsector);
+	
+	// JPL - run scene check & teleport
+	checkGoodShotPostRender();
 
 	All.Unclock();
 }

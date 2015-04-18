@@ -855,6 +855,12 @@ static void DrawCoordinates(player_t * CPlayer)
 	screen->DrawText(SmallFont, hudcolor_xyco, xpos, ypos+2*h, coordstr,
 		DTA_KeepRatio, true,
 		DTA_VirtualWidth, vwidth, DTA_VirtualHeight, vheight, TAG_DONE);
+
+	// JPL: scene complexity readout
+	mysnprintf(coordstr, countof(coordstr), "sc: %d", level.scene_complexity);
+	screen->DrawText(SmallFont, hudcolor_xyco, xpos, ypos+3*h, coordstr,
+		DTA_KeepRatio, true,
+		DTA_VirtualWidth, vwidth, DTA_VirtualHeight, vheight, TAG_DONE);
 }
 
 //---------------------------------------------------------------------------

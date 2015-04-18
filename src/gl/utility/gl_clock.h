@@ -120,6 +120,6 @@ extern int vertexcount, flatvertices, flatprimitives;
 void ResetProfilingData();
 void CheckBench();
 void  checkBenchActive();
-
+void checkGoodShotPostRender();
 
 #endif

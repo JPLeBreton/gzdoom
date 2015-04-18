@@ -15,6 +15,11 @@
 #include "gl/utility/gl_clock.h"
 #include "gl/utility/gl_convert.h"
 
+// JPL: stuff for goodshot
+#include "d_net.h"
+#include "m_random.h"
+#include "p_local.h"
+#include "m_misc.h"
 
 glcycle_t RenderWall,SetupWall,ClipWall,SplitWall;
 glcycle_t RenderFlat,SetupFlat;
@@ -132,6 +137,19 @@ static void AppendRenderStats(FString &out)
 		rendered_lines, render_vertexsplit, render_texsplit, vertexcount, rendered_flats, flatprimitives, flatvertices, rendered_sprites,rendered_decals, rendered_portals );
 }
 
+CCMD(printrenderstats)
+{
+	//int scene_complexity = 0;
+	/*
+	Printf ("Walls: %d (%d splits, %d t-splits, %d vertices)\n"
+		"Flats: %d (%d primitives, %d vertices)\n"
+		"Sprites: %d, Decals=%d, Portals: %d\n",
+		rendered_lines, render_vertexsplit, render_texsplit, vertexcount, rendered_flats, flatprimitives, flatvertices, rendered_sprites,rendered_decals, rendered_portals );
+	*/
+	//SceneComplexity = rendered_lines + rendered_flats + rendered_sprites;
+	Printf ("Overall scene complexity: %d", level.scene_complexity);
+}
+
 static void AppendLightStats(FString &out)
 {
 	out.AppendFormat("DLight - Walls: %d processed, %d rendered - Flats: %d processed, %d rendered\n", 
@@ -225,9 +243,127 @@ CCMD(bench)
 
 bool gl_benching = false;
 
+// JPL: goodshot console command
+bool goodshooting = false;
+int current_shot_sector = 0;
+int current_shot_subsector = 0;
+int best_shot_complexity = 0;
+int best_shot_x = 0;
+int best_shot_y = 0;
+int best_shot_angle = 0;
+
 void  checkBenchActive()
 {
 	FStat *stat = FStat::FindStat("rendertimes");
 	gl_benching = ((stat != NULL && stat->isActive()) || printstats);
 }
 
+void checkGoodShotPostRender()
+{
+	level.scene_complexity = rendered_lines + rendered_flats + rendered_sprites;
+	if ( !goodshooting )
+	{
+		return;
+	}
+	if ( current_shot_sector >= numsectors )
+	{
+        //Printf("\nBest scene complexity found at %d, %d: %d\n", best_shot_x, best_shot_y, best_shot_complexity);
+		goodshooting = false;
+        Net_WriteByte (DEM_WARPCHEAT);
+        Net_WriteWord (best_shot_x);
+    	Net_WriteWord (best_shot_y);
+		players[consoleplayer].mo->angle = best_shot_angle;
+        // reset state so goodshot can run again
+        current_shot_sector = 0;
+        current_shot_subsector = 0;
+        best_shot_complexity = 0;
+		// TODO: wait one more frame for warp to take effect before screenshot & exit
+		//M_ScreenShot ("shot.png");
+		//exit (0);
+		return;
+	}
+	// store current scene complexity in FLevelLocals so HUD can get it easily
+	//Printf("new loc scene complexity: %d\n", level.scene_complexity);
+	// check if current scene complexity > best_shot_complexity
+	sector_t * sector = &sectors[current_shot_sector];
+	int player_x = players[consoleplayer].mo->x >> FRACBITS;
+	int player_y = players[consoleplayer].mo->y >> FRACBITS;
+	if ( level.scene_complexity > best_shot_complexity )
+	{
+		// if floor and ceiling are same height, skip!
+		fixed_t ceilingheight = sector->ceilingplane.ZatPoint (player_x, player_y);
+		fixed_t floorheight = sector->floorplane.ZatPoint (player_x, player_y);
+		if ( floorheight != ceilingheight )
+		{
+			best_shot_complexity = level.scene_complexity;
+			// set bests to player X/Y/angle
+			best_shot_x = player_x;
+			best_shot_y = player_y;
+			best_shot_angle = players[consoleplayer].mo->angle;
+		}
+	}
+	// warp to next spot, renderer has to do its thing so we can check new
+	// scene next frame
+	subsector_t * sub = sector->subsectors[current_shot_subsector];
+	// find center of subsector
+	float x_total = 0;
+	float y_total = 0;
+	int total_verts = 0;
+	for(DWORD k=0; k < sub->numlines; k++)
+	{
+		seg_t * seg = sub->firstline + k;
+		x_total += FIXED2FLOAT(seg->v1->x);
+		y_total += FIXED2FLOAT(seg->v1->y);
+		x_total += FIXED2FLOAT(seg->v2->x);
+		y_total += FIXED2FLOAT(seg->v2->y);
+		total_verts += 2;
+	}
+	int x = x_total / total_verts;
+	int y = y_total / total_verts;
+    //Printf("Warping to subsector %d at %d, %d... ", int(sub-subsectors), x, y);
+	Net_WriteByte (DEM_WARPCHEAT);
+	Net_WriteWord (x);
+	Net_WriteWord (y);
+	// face towards center of sector
+	x_total = 0;
+	y_total = 0;
+	total_verts = 0;
+	for(int j=0; j < sector->subsectorcount; j++)
+	{
+		subsector_t * sub2 = sector->subsectors[j];
+		for(DWORD k=0; k < sub->numlines; k++)
+		{
+			seg_t * seg = sub->firstline + k;
+			x_total += FIXED2FLOAT(seg->v1->x);
+			y_total += FIXED2FLOAT(seg->v1->y);
+			x_total += FIXED2FLOAT(seg->v2->x);
+			y_total += FIXED2FLOAT(seg->v2->y);
+			total_verts += 2;
+		}
+	}
+	x = x_total / total_verts;
+	y = y_total / total_verts;
+	players[consoleplayer].mo->angle = R_PointToAngle2 (player_x, player_y, x, y);
+	// move index to next subsector (in next sector if that was last subsector)
+	current_shot_subsector++;
+	if ( current_shot_subsector >= sector->subsectorcount )
+	{
+		current_shot_sector++;
+		current_shot_subsector = 0;
+	}
+}
+
+CCMD(goodshot)
+{
+	if (gamestate != GS_LEVEL)
+	{
+		Printf ("You can only run goodshot inside a level.\n");
+		return;
+	}
+	goodshooting = true;
+}
+
+CCMD(printscenecomplexity)
+{
+    Printf("Current scene complexity: %d\n", level.scene_complexity);
+}

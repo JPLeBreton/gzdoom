@@ -424,7 +424,9 @@ struct FLevelLocals
 
 	int			total_secrets;
 	int			found_secrets;
-
+	
+	int         scene_complexity;
+	
 	int			total_items;
 	int			found_items;
 
