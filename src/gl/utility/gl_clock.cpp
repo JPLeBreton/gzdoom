@@ -243,8 +243,19 @@ CCMD(bench)
 
 bool gl_benching = false;
 
+void  checkBenchActive()
+{
+	FStat *stat = FStat::FindStat("rendertimes");
+	gl_benching = ((stat != NULL && stat->isActive()) || printstats);
+}
+
 // JPL: goodshot console command
+bool quit_after_shot = true;
+int goodshot_frames_to_wait = 45;
+
 bool goodshooting = false;
+bool goodshot_ready = false;
+int goodshot_wait_frames = 0;
 int current_shot_sector = 0;
 int current_shot_subsector = 0;
 int best_shot_complexity = 0;
@@ -252,15 +263,31 @@ int best_shot_x = 0;
 int best_shot_y = 0;
 int best_shot_angle = 0;
 
-void  checkBenchActive()
-{
-	FStat *stat = FStat::FindStat("rendertimes");
-	gl_benching = ((stat != NULL && stat->isActive()) || printstats);
-}
-
 void checkGoodShotPostRender()
 {
 	level.scene_complexity = rendered_lines + rendered_flats + rendered_sprites;
+	if ( goodshot_ready )
+	{
+		// wait a few frames after warp finishes to reach normal stand height
+		if ( goodshot_wait_frames >= goodshot_frames_to_wait )
+		{
+			M_ScreenShot ("shot.png");
+			// log player position - copy-pasted from CCMD(currentpos)
+			AActor *mo = players[consoleplayer].mo;
+			Printf("Current player position: (%1.3f,%1.3f,%1.3f), angle: %1.3f, floorheight: %1.3f, sector:%d, lightlevel: %d\n",
+				   FIXED2FLOAT(mo->x), FIXED2FLOAT(mo->y), FIXED2FLOAT(mo->z), mo->angle/float(ANGLE_1), FIXED2FLOAT(mo->floorz), mo->Sector->sectornum, mo->Sector->lightlevel);
+			if ( quit_after_shot )
+			{
+				exit (0);
+		    } else {
+				goodshot_ready = false;
+				return;
+			}
+		} else {
+			goodshot_wait_frames++;
+			return;
+		}
+	}
 	if ( !goodshooting )
 	{
 		return;
@@ -277,9 +304,8 @@ void checkGoodShotPostRender()
         current_shot_sector = 0;
         current_shot_subsector = 0;
         best_shot_complexity = 0;
-		// TODO: wait one more frame for warp to take effect before screenshot & exit
-		//M_ScreenShot ("shot.png");
-		//exit (0);
+		// wait one more frame for warp to take effect before screenshot & exit
+		goodshot_ready = true;
 		return;
 	}
 	// store current scene complexity in FLevelLocals so HUD can get it easily
