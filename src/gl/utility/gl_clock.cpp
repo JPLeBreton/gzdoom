@@ -252,16 +252,47 @@ void  checkBenchActive()
 // JPL: goodshot console command
 bool quit_after_shot = true;
 int goodshot_frames_to_wait = 45;
+int min_sector_height = 16;
 
 bool goodshooting = false;
 bool goodshot_ready = false;
+int goodshot_index = 0;
 int goodshot_wait_frames = 0;
+
 int current_shot_sector = 0;
 int current_shot_subsector = 0;
-int best_shot_complexity = 0;
-int best_shot_x = 0;
-int best_shot_y = 0;
-int best_shot_angle = 0;
+int best_shot0_complexity = 0;
+int best_shot0_x = 0;
+int best_shot0_y = 0;
+int best_shot0_angle = 0;
+int best_shot1_complexity = 0;
+int best_shot1_x = 0;
+int best_shot1_y = 0;
+int best_shot1_angle = 0;
+int best_shot2_complexity = 0;
+int best_shot2_x = 0;
+int best_shot2_y = 0;
+int best_shot2_angle = 0;
+
+void takeGoodShot()
+{
+	FString shotname;
+	shotname.Format("shot%d.png", goodshot_index);
+	M_ScreenShot (shotname);
+	// log player position - copy-pasted from CCMD(currentpos)
+	AActor *mo = players[consoleplayer].mo;
+	Printf("Current player position: (%1.3f,%1.3f,%1.3f), angle: %1.3f, floorheight: %1.3f, sector:%d, lightlevel: %d\n",
+		   FIXED2FLOAT(mo->x), FIXED2FLOAT(mo->y), FIXED2FLOAT(mo->z), mo->angle/float(ANGLE_1), FIXED2FLOAT(mo->floorz), mo->Sector->sectornum, mo->Sector->lightlevel);
+}
+
+void warpToShotSpot(int x, int y, int angle)
+{
+	Net_WriteByte (DEM_WARPCHEAT);
+	Net_WriteWord (x);
+	Net_WriteWord (y);
+	players[consoleplayer].mo->angle = angle;
+	return;
+}
 
 void checkGoodShotPostRender()
 {
@@ -271,18 +302,30 @@ void checkGoodShotPostRender()
 		// wait a few frames after warp finishes to reach normal stand height
 		if ( goodshot_wait_frames >= goodshot_frames_to_wait )
 		{
-			M_ScreenShot ("shot.png");
-			// log player position - copy-pasted from CCMD(currentpos)
-			AActor *mo = players[consoleplayer].mo;
-			Printf("Current player position: (%1.3f,%1.3f,%1.3f), angle: %1.3f, floorheight: %1.3f, sector:%d, lightlevel: %d\n",
-				   FIXED2FLOAT(mo->x), FIXED2FLOAT(mo->y), FIXED2FLOAT(mo->z), mo->angle/float(ANGLE_1), FIXED2FLOAT(mo->floorz), mo->Sector->sectornum, mo->Sector->lightlevel);
-			if ( quit_after_shot )
+			takeGoodShot();
+			// decrement shot index; move on to next shot or quit if done
+			goodshot_index++;
+			if ( goodshot_index == 3 )
 			{
-				exit (0);
-		    } else {
-				goodshot_ready = false;
-				return;
+				// done
+				if ( quit_after_shot )
+				{
+					exit (0);
+				} else {
+					goodshot_ready = false;
+					return;
+				}
+			} else {
+				// move to next shot
+				if ( goodshot_index == 1 )
+				{
+					warpToShotSpot(best_shot1_x, best_shot1_y, best_shot1_angle);
+				} else if ( goodshot_index == 2 ) {
+					warpToShotSpot(best_shot2_x, best_shot2_y, best_shot2_angle);
+				}
 			}
+			// reset wait frames
+			goodshot_wait_frames = 0;
 		} else {
 			goodshot_wait_frames++;
 			return;
@@ -295,15 +338,14 @@ void checkGoodShotPostRender()
 	if ( current_shot_sector >= numsectors )
 	{
         //Printf("\nBest scene complexity found at %d, %d: %d\n", best_shot_x, best_shot_y, best_shot_complexity);
+		warpToShotSpot(best_shot0_x, best_shot0_y, best_shot0_angle);
 		goodshooting = false;
-        Net_WriteByte (DEM_WARPCHEAT);
-        Net_WriteWord (best_shot_x);
-    	Net_WriteWord (best_shot_y);
-		players[consoleplayer].mo->angle = best_shot_angle;
         // reset state so goodshot can run again
         current_shot_sector = 0;
         current_shot_subsector = 0;
-        best_shot_complexity = 0;
+        best_shot0_complexity = 0;
+		best_shot1_complexity = 0;
+		best_shot2_complexity = 0;
 		// wait one more frame for warp to take effect before screenshot & exit
 		goodshot_ready = true;
 		return;
@@ -314,18 +356,29 @@ void checkGoodShotPostRender()
 	sector_t * sector = &sectors[current_shot_sector];
 	int player_x = players[consoleplayer].mo->x >> FRACBITS;
 	int player_y = players[consoleplayer].mo->y >> FRACBITS;
-	if ( level.scene_complexity > best_shot_complexity )
+	if ( level.scene_complexity > best_shot0_complexity )
 	{
 		// if floor and ceiling are same height, skip!
 		fixed_t ceilingheight = sector->ceilingplane.ZatPoint (player_x, player_y);
 		fixed_t floorheight = sector->floorplane.ZatPoint (player_x, player_y);
-		if ( floorheight != ceilingheight )
+		if ( ceilingheight - floorheight > min_sector_height )
 		{
-			best_shot_complexity = level.scene_complexity;
-			// set bests to player X/Y/angle
-			best_shot_x = player_x;
-			best_shot_y = player_y;
-			best_shot_angle = players[consoleplayer].mo->angle;
+			// knock existing bests down one notch, pushing lowest off
+			best_shot2_complexity = best_shot1_complexity;
+			best_shot2_x = best_shot1_x;
+			best_shot2_y = best_shot1_y;
+			best_shot2_angle = best_shot1_angle;
+			
+			best_shot1_complexity = best_shot0_complexity;
+			best_shot1_x = best_shot0_x;
+			best_shot1_y = best_shot0_y;
+			best_shot1_angle = best_shot0_angle;
+			
+			// set new bests to player X/Y/angle
+			best_shot0_complexity = level.scene_complexity;
+			best_shot0_x = player_x;
+			best_shot0_y = player_y;
+			best_shot0_angle = players[consoleplayer].mo->angle;
 		}
 	}
 	// warp to next spot, renderer has to do its thing so we can check new
